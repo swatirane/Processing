@@ -1,0 +1,27 @@
+# BOLD preprocessing for Kristian
+# Swati Rane
+# July 2017
+#----------------------
+
+SHELL=/bin/bash
+cwd=$(shell pwd -P)
+
+SUBJECTS=$(shell cat subjects.txt)
+
+.PHONY: makefiles all $(SUBJECTS)
+
+all:makefiles $(SUBJECTS)
+
+#Execte the makefile within each subject based on the TARGET specified
+$(SUBJECTS): 
+	$(MAKE) --directory=$@ $(TARGET)
+
+#Create/Update the Makefile in each subject directory
+makefiles: $(SUBJECTS:%=%/Makefile)
+
+$(SUBJECTS:%=%/Makefile): BOLD_preproc.subdir
+	mkdir -p $(SUBJECTS)
+	ln -sf $$PWD/$(word 1, $^) $@ 
+
+
+

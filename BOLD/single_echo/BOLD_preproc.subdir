@@ -1,0 +1,93 @@
+# resting state preprocssing
+# Swati Rane
+
+SHELL=/bin/bash
+cwd=$(shell pwd)
+
+export OMP_NUM_THREADS=1
+#export FSLPARALLEL=true
+
+PROJECT_DIR=/mnt/parcellator/Alzheimers
+FSL_PATH = ${FSLDIR}/bin
+STD_BRAIN2mm = ${FSLDIR}/data/standard/MNI152_T1_2mm_brain.nii.gz
+
+SIGMA = 4 #volumes
+TR = 3000 #ms
+TE = 30 #ms
+dyn = 140
+
+SUBJ = $(shell basename $(cwd))
+T1 = $(shell echo "$(SUBJ)" | tr f a)
+
+.PHONY: BOLD
+
+BOLD: BOLD-all REG-all
+
+BOLD-clean:
+	rm *.nii.gz 
+
+T1-clean:
+	rm -rf t1
+
+BOLD-all: $(SUBJ)_mcf.nii.gz $(SUBJ)_bmcf.nii.gz $(SUBJ)_mask.nii.gz $(SUBJ)_smcf.nii.gz $(SUBJ)_dsmcf.nii.gz $(SUBJ)_mdsmcf.nii.gz
+
+REG-all: t1/$(SUBJ)_brain.nii.gz
+
+
+# BOLD-all: BOLD preprocessing except physiological noise removal
+# Motion correction using FSL MCFLIRT
+$(SUBJ)_mcf.nii.gz: $(PROJECT_DIR)/BOLD/$(SUBJ).nii.gz
+	echo Motion correction;\
+	$(FSL_PATH)/mcflirt -in $< -out $@;\
+	echo Done
+
+# Brain extraction to remove skull and other non-brain tissue
+$(SUBJ)_bmcf.nii.gz:  $(SUBJ)_mcf.nii.gz
+	echo Betting data;\
+	$(FSL_PATH)/bet $< $@;\
+	echo Done
+
+# Creating a binary brain mask
+$(SUBJ)_mask.nii.gz: $(SUBJ)_bmcf.nii.gz
+	echo Binarising brain area;\
+	$(FSL_PATH)/fslmaths $< -bin $@;\
+	echo Done
+
+# Smooth data with 7 mm kernel
+# FWHM  = 7 
+# sigma of gaussian kernel = FWHM/2.35 = 2.97
+$(SUBJ)_smcf.nii.gz: $(SUBJ)_mcf.nii.gz
+	echo Smoothing;\
+	$(FSL_PATH)/fslmaths $< -kernel gauss 2.97 -fmean $@;\
+	echo Done
+
+# Detrend data
+$(SUBJ)_dsmcf.nii.gz: $(SUBJ)_smcf.nii.gz
+	echo Detrending;\
+	$(FSL_PATH)/fslmaths $< -Tmean tempMean.nii.gz ;\
+	$(FSL_PATH)/fslmaths $< -bptf $(SIGMA) -1 -add tempMean.nii.gz $@ ;\
+	rm tempMean.nii.gz;\
+	echo Done
+
+# Apply binarized mask to fMRI run
+$(SUBJ)_mdsmcf.nii.gz: $(SUBJ)_mask.nii.gz $(SUBJ)_dsmcf.nii.gz
+	echo Applying BET mask;\
+	$(FSL_PATH)/fslmaths $(word 2,$^) -mas $(word 1,$^) $@;\
+	echo Done
+
+# REG-all: Registration of BOLD to T1
+t1/$(SUBJ)_brain.nii.gz: $(PROJECT_DIR)/T1/$(T1).nii.gz
+	echo Betting data;\
+	mkdir -p t1;\
+	$(FSL_PATH)/bet $< $@ -R;\
+	echo Done
+
+$(SUBJ)_tmdsmcf.nii.gz: $(SUBJ)_mdsmcf.nii.gz t1/$(SUBJ)_brain.nii.gz
+	echo Registering BOLD to T1;\
+	mkdir -p txform
+	$(FSL_PATH)/flirt -in $(word 1,$^) -out temp -ref $(word 2,$^) -cost mutualinfo -omat txform/BOLD2T1.mat -dof 6;\
+	$(FSL_PATH)/flirt -in $(word 1,$^) -out $@ -ref $(word 2,$^) -applyxfm -init txform/BOLD2T1.mat;\
+	rm temp.nii.gz;\
+	echo Done
+	
+	
